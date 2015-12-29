@@ -343,6 +343,29 @@ func (r *MongoReadRepository) FindCustom(callback func(*mgo.Collection) *mgo.Que
 	return result, nil
 }
 
+// PipeQuery is used for chaining query elements and creating a aggregated group query
+func (r *MongoReadRepository) PipeQuery(callback func(*mgo.Collection) *mgo.Pipe) ([]interface{}, error) {
+	sess := r.session.Copy()
+	defer sess.Close()
+
+	collection := sess.DB(r.db).C(r.collection)
+	query := callback(collection)
+
+	iter := query.Iter()
+
+	var results []interface{}
+	err := iter.All(&results)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := iter.Close(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
 // FindAll returns all read models in the repository.
 func (r *MongoReadRepository) FindAll() ([]interface{}, error) {
 	sess := r.session.Copy()
