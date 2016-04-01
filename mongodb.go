@@ -210,7 +210,7 @@ func (s *MongoEventStore) Load(id UUID) ([]Event, error) {
 			return nil, ErrInvalidEvent
 		}
 
-		// Set conrcete event and zero out the decoded event.
+		// Set concrete event and zero out the decoded event.
 		record.Event = events[i]
 		record.Data = bson.Raw{}
 	}
