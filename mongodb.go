@@ -24,34 +24,34 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// Error returned when the database could not be dialed.
+// ErrCouldNotDialDB returned when the database could not be dialed.
 var ErrCouldNotDialDB = errors.New("could not dial database")
 
-// Error returned when no database session is set.
+// ErrNoDBSession returned when no database session is set.
 var ErrNoDBSession = errors.New("no database session")
 
-// Error returned when the database could not be cleared.
+// ErrCouldNotClearDB returned when the database could not be cleared.
 var ErrCouldNotClearDB = errors.New("could not clear database")
 
-// Error returned when an event is not registered.
+// ErrEventNotRegistered returned when an event is not registered.
 var ErrEventNotRegistered = errors.New("event not registered")
 
-// Error returned when an model is not set on a read repository.
+// ErrModelNotSet returned when an model is not set on a read repository.
 var ErrModelNotSet = errors.New("model not set")
 
-// Error returned when an event could not be marshaled into BSON.
+// ErrCouldNotMarshalEvent returned when an event could not be marshaled into BSON.
 var ErrCouldNotMarshalEvent = errors.New("could not marshal event")
 
-// Error returned when an event could not be unmarshaled into a concrete type.
+// ErrCouldNotUnmarshalEvent returned when an event could not be unmarshaled into a concrete type.
 var ErrCouldNotUnmarshalEvent = errors.New("could not unmarshal event")
 
-// Error returned when an aggregate could not be loaded.
+// ErrCouldNotLoadAggregate returned when an aggregate could not be loaded.
 var ErrCouldNotLoadAggregate = errors.New("could not load aggregate")
 
-// Error returned when an aggregate could not be saved.
+// ErrCouldNotSaveAggregate returned when an aggregate could not be saved.
 var ErrCouldNotSaveAggregate = errors.New("could not save aggregate")
 
-// Error returned when an event does not implement the Event interface.
+// ErrInvalidEvent returned when an event does not implement the Event interface.
 var ErrInvalidEvent = errors.New("invalid event")
 
 // MongoEventStore implements an EventStore for MongoDB.
@@ -182,17 +182,20 @@ func (s *MongoEventStore) Save(events []Event) error {
 }
 
 // Load loads all events for the aggregate id from the database.
-// Returns ErrNoEventsFound if no events can be found.
+// Returns nil if no events can be found.
 func (s *MongoEventStore) Load(id UUID) ([]Event, error) {
 	sess := s.session.Copy()
 	defer sess.Close()
 
-	var aggregate mongoAggregateRecord
-	err := sess.DB(s.db).C("events").FindId(id.String()).One(&aggregate)
-	if err != nil {
-		return nil, ErrNoEventsFound
+	var aggregates []mongoAggregateRecord
+	err := sess.DB(s.db).C("events").FindId(id.String()).Limit(1).All(&aggregates)
+	if err != nil || len(aggregates) > 1 {
+		return nil, ErrCouldNotLoadAggregate
+	} else if len(aggregates) == 0 {
+		return nil, nil
 	}
 
+	aggregate := aggregates[0]
 	events := make([]Event, len(aggregate.Events))
 	for i, record := range aggregate.Events {
 		// Get the registered factory function for creating events.

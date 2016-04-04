@@ -19,13 +19,10 @@ import (
 	"time"
 )
 
-// Error returned when no events are available to append.
+// ErrNoEventsToAppend returned when no events are available to append.
 var ErrNoEventsToAppend = errors.New("no events to append")
 
-// Error returned when no events are found.
-var ErrNoEventsFound = errors.New("could not find events")
-
-// Error returned if no event store has been defined.
+// ErrNoEventStoreDefined returned if no event store has been defined.
 var ErrNoEventStoreDefined = errors.New("no event store defined")
 
 // EventStore is an interface for an event sourcing event store.
@@ -101,7 +98,7 @@ func (s *MemoryEventStore) Save(events []Event) error {
 }
 
 // Load loads all events for the aggregate id from the memory store.
-// Returns ErrNoEventsFound if no events can be found.
+// Returns nil if no events can be found.
 func (s *MemoryEventStore) Load(id UUID) ([]Event, error) {
 	if a, ok := s.aggregateRecords[id]; ok {
 		events := make([]Event, len(a.events))
@@ -111,7 +108,7 @@ func (s *MemoryEventStore) Load(id UUID) ([]Event, error) {
 		return events, nil
 	}
 
-	return nil, ErrNoEventsFound
+	return nil, nil
 }
 
 type memoryAggregateRecord struct {

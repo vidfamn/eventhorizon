@@ -88,7 +88,7 @@ func (s *MemoryEventStoreSuite) Test_DifferentAggregates(c *C) {
 
 func (s *MemoryEventStoreSuite) Test_LoadNoEvents(c *C) {
 	events, err := s.store.Load(NewUUID())
-	c.Assert(err, ErrorMatches, "could not find events")
+	c.Assert(err, Equals, nil)
 	c.Assert(events, DeepEquals, []Event(nil))
 }
 
@@ -244,7 +244,7 @@ func (s *TraceEventStoreSuite) Test_LoadNoBaseStore(c *C) {
 
 func (s *TraceEventStoreSuite) Test_LoadNoEvents(c *C) {
 	events, err := s.store.Load(NewUUID())
-	c.Assert(err, ErrorMatches, "could not find events")
+	c.Assert(err, Equals, nil)
 	c.Assert(events, DeepEquals, []Event(nil))
 }
 

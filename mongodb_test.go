@@ -128,7 +128,7 @@ func (s *MongoEventStoreSuite) Test_NotRegisteredEvent(c *C) {
 
 func (s *MongoEventStoreSuite) Test_LoadNoEvents(c *C) {
 	events, err := s.store.Load(NewUUID())
-	c.Assert(err, ErrorMatches, "could not find events")
+	c.Assert(err, Equals, nil)
 	c.Assert(events, DeepEquals, []Event(nil))
 }
 
