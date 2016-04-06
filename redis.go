@@ -35,7 +35,6 @@ type RedisEventBus struct {
 	pool           *redis.Pool
 	conn           *redis.PubSubConn
 	factories      map[string]func() Event
-	exit           chan struct{}
 }
 
 // NewRedisEventBus creates a RedisEventBus for remote events.
@@ -74,19 +73,15 @@ func NewRedisEventBusWithPool(appID string, pool *redis.Pool) (*RedisEventBus, e
 		prefix:         appID + ":events:",
 		pool:           pool,
 		factories:      make(map[string]func() Event),
-		exit:           make(chan struct{}),
 	}
 
-	// Add a patten matching subscription.
-	b.conn = &redis.PubSubConn{Conn: b.pool.Get()}
-	ready := make(chan struct{})
-	go b.receiveGlobal(ready)
-	err := b.conn.PSubscribe(b.prefix + "*")
+	ready := make(chan error)
+	go b.connectAndSubscribe(ready)
+
+	err := <-ready
 	if err != nil {
-		b.Close()
 		return nil, err
 	}
-	<-ready
 
 	return b, nil
 }
@@ -145,14 +140,9 @@ func (b *RedisEventBus) RegisterEventType(event Event, factory func() Event) err
 	return nil
 }
 
-// Close exits the recive goroutine by unsubscribing to all channels.
+// Close exits the receive goroutine by unsubscribing to all channels.
 func (b *RedisEventBus) Close() {
 	err := b.conn.PUnsubscribe()
-	if err != nil {
-		log.Printf("error: event bus close: %v\n", err)
-	}
-	<-b.exit
-	err = b.conn.Close()
 	if err != nil {
 		log.Printf("error: event bus close: %v\n", err)
 	}
@@ -178,7 +168,60 @@ func (b *RedisEventBus) publishGlobal(event Event) {
 	}
 }
 
-func (b *RedisEventBus) receiveGlobal(ready chan struct{}) {
+// connectAndSubscribe connects to event bus and subscribes to events. Will retry on event bus connection failure.
+func (b *RedisEventBus) connectAndSubscribe(ready chan error) {
+	isRetry := false
+	for {
+		conn := b.pool.Get()
+		err := conn.Err()
+		if err != nil {
+			log.Printf("error: event bus connect: %v\n", err)
+			log.Println("error: retrying event bus connection in 10s...")
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		b.conn = &redis.PubSubConn{Conn: conn}
+
+		// Add a pattern matching subscription.
+		err = b.conn.PSubscribe(b.prefix + "*")
+		if err != nil {
+			ready <- err
+			b.Close()
+			return
+		}
+
+		// start receive loop
+		receiveGlobalDone := make(chan bool, 1)
+		go b.receiveGlobal(receiveGlobalDone)
+
+		if isRetry {
+			log.Println("info: event bus connected")
+		} else {
+			close(ready)
+		}
+
+		// wait for receive loop to exit
+		done := <-receiveGlobalDone
+		close(receiveGlobalDone)
+
+		err = b.conn.Close()
+		if err != nil {
+			log.Printf("error: event bus close: %v\n", err)
+		}
+
+		if done {
+			return
+		}
+
+		// wait for failed connection to close properly
+		time.Sleep(1 * time.Second)
+		isRetry = true
+	}
+}
+
+// receiveGlobal starts receive loop for event bus. Done chan returns true on successful exit, otherwise false.
+func (b *RedisEventBus) receiveGlobal(done chan bool) {
 	for {
 		switch n := b.conn.Receive().(type) {
 		case redis.PMessage:
@@ -193,7 +236,7 @@ func (b *RedisEventBus) receiveGlobal(ready chan struct{}) {
 			}
 
 			// Manually decode the raw BSON event.
-			data := bson.Raw{3, n.Data}
+			data := bson.Raw{Kind: 3, Data: n.Data}
 			event := f()
 			if err := data.Unmarshal(event); err != nil {
 				log.Printf("error: event bus receive: %v\n", ErrCouldNotUnmarshalEvent)
@@ -206,16 +249,16 @@ func (b *RedisEventBus) receiveGlobal(ready chan struct{}) {
 		case redis.Subscription:
 			switch n.Kind {
 			case "psubscribe":
-				close(ready)
+				continue
 			case "punsubscribe":
 				if n.Count == 0 {
-					close(b.exit)
+					done <- true
 					return
 				}
 			}
 		case error:
 			log.Printf("error: event bus receive: %v\n", n)
-			close(b.exit)
+			done <- false
 			return
 		}
 	}
