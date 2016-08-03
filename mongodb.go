@@ -55,6 +55,7 @@ var ErrCouldNotSaveAggregate = errors.New("could not save aggregate")
 var ErrInvalidEvent = errors.New("invalid event")
 
 // MongoEventStore implements an EventStore for MongoDB.
+// This event store fulfills both EventStore and EventRecordStore interfaces.
 type MongoEventStore struct {
 	eventBus  EventBus
 	session   *mgo.Session
@@ -99,6 +100,9 @@ type mongoAggregateRecord struct {
 	// Snapshot    bson.Raw      `bson:"snapshot"`
 }
 
+// mongoEventRecord does not fulfill the EventRecord interface due to conflict with
+// field names. Instead the mongoEventRecord is wrapped with a eventRecordWrapper
+// which fulfills the interface
 type mongoEventRecord struct {
 	Type      string    `bson:"type"`
 	Version   int       `bson:"version"`
@@ -106,6 +110,16 @@ type mongoEventRecord struct {
 	Event     Event     `bson:"-"`
 	Data      bson.Raw  `bson:"data"`
 }
+
+// mongoEventRecordWrapper wraps a record and fulfill the interface EventRecord
+type mongoEventRecordWrapper struct {
+	record *mongoEventRecord
+}
+
+func (m *mongoEventRecordWrapper) Type() string         { return m.record.Type }
+func (m *mongoEventRecordWrapper) Version() int         { return m.record.Version }
+func (m *mongoEventRecordWrapper) Timestamp() time.Time { return m.record.Timestamp }
+func (m *mongoEventRecordWrapper) Events() []Event      { return []Event{m.record.Event} }
 
 // Save appends all events in the event stream to the database.
 func (s *MongoEventStore) Save(events []Event) error {
@@ -219,6 +233,50 @@ func (s *MongoEventStore) Load(id UUID) ([]Event, error) {
 	}
 
 	return events, nil
+}
+
+// Records returns the complete event records, containing timestamp and version.
+func (s *MongoEventStore) Records(id UUID) ([]EventRecord, error) {
+
+	sess := s.session.Copy()
+	defer sess.Close()
+
+	var aggregates []mongoAggregateRecord
+	err := sess.DB(s.db).C("events").FindId(id.String()).Limit(1).All(&aggregates)
+	if err != nil || len(aggregates) > 1 {
+		return nil, ErrCouldNotLoadAggregate
+	} else if len(aggregates) == 0 {
+		return nil, nil
+	}
+
+	aggregate := aggregates[0]
+	records := make([]EventRecord, len(aggregate.Events))
+	for i, record := range aggregate.Events {
+		// Get the registered factory function for creating events.
+		f, ok := s.factories[record.Type]
+		if !ok {
+			return nil, ErrEventNotRegistered
+		}
+
+		// Manually decode the raw BSON event.
+		event := f()
+		if err := record.Data.Unmarshal(event); err != nil {
+			return nil, ErrCouldNotUnmarshalEvent
+		}
+		if event, ok = event.(Event); !ok {
+			return nil, ErrInvalidEvent
+		}
+
+		// Set concrete event and zero out the decoded event.
+		record.Event = event
+		record.Data = bson.Raw{}
+
+		records[i] = &mongoEventRecordWrapper{record}
+
+	}
+
+	return records, nil
+
 }
 
 // RegisterEventType registers an event factory for a event type. The factory is

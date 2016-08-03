@@ -34,6 +34,13 @@ type EventStore interface {
 	Load(UUID) ([]Event, error)
 }
 
+// EventRecordStore is an interface for an event store which can return the records for the events.
+type EventRecordStore interface {
+	// Returns the event records for the aggregate id from the store.
+	// The record contains information about version and timestamp for the event.
+	Records(UUID) ([]EventRecord, error)
+}
+
 // AggregateRecord is a stored record of an aggregate in form of its events.
 type AggregateRecord interface {
 	AggregateID() UUID
@@ -46,9 +53,11 @@ type EventRecord interface {
 	Type() string
 	Version() int
 	Events() []Event
+	Timestamp() time.Time
 }
 
 // MemoryEventStore implements EventStore as an in memory structure.
+// This event store fulfills both EventStore and EventRecordStore
 type MemoryEventStore struct {
 	eventBus         EventBus
 	aggregateRecords map[UUID]*memoryAggregateRecord
@@ -111,6 +120,19 @@ func (s *MemoryEventStore) Load(id UUID) ([]Event, error) {
 	return nil, nil
 }
 
+// Records returns the complete event records, containing timestamp and version.
+func (s *MemoryEventStore) Records(id UUID) ([]EventRecord, error) {
+	if a, ok := s.aggregateRecords[id]; ok {
+		events := make([]EventRecord, len(a.events))
+		for i, r := range a.events {
+			events[i] = r
+		}
+		return events, nil
+	}
+
+	return nil, nil
+}
+
 type memoryAggregateRecord struct {
 	aggregateID UUID
 	version     int
@@ -123,6 +145,11 @@ type memoryEventRecord struct {
 	timestamp time.Time
 	event     Event
 }
+
+func (m *memoryEventRecord) Type() string         { return m.eventType }
+func (m *memoryEventRecord) Version() int         { return m.version }
+func (m *memoryEventRecord) Timestamp() time.Time { return m.timestamp }
+func (m *memoryEventRecord) Events() []Event      { return []Event{m.event} }
 
 // TraceEventStore wraps an EventStore and adds debug tracing.
 type TraceEventStore struct {
