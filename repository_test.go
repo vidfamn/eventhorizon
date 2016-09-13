@@ -67,6 +67,15 @@ func (t *TestRepositoryAggregate) ApplyEvent(event Event) {
 	t.event = event
 }
 
+type TestRepositoryEvent struct {
+	TestID  UUID
+	Content string
+}
+
+func (t *TestRepositoryEvent) AggregateID() UUID     { return t.TestID }
+func (t *TestRepositoryEvent) AggregateType() string { return "TestRepositoryAggregate" }
+func (t *TestRepositoryEvent) EventType() string     { return "TestEvent" }
+
 func (s *CallbackRepositorySuite) Test_Load_NoEvents(c *C) {
 	err := s.repo.RegisterAggregate(&TestRepositoryAggregate{},
 		func(id UUID) Aggregate {
@@ -95,7 +104,7 @@ func (s *CallbackRepositorySuite) Test_Load_Events(c *C) {
 	c.Assert(err, IsNil)
 
 	id := NewUUID()
-	event1 := &TestEvent{id, "event"}
+	event1 := &TestRepositoryEvent{id, "event"}
 	s.store.Save([]Event{event1})
 	agg, err := s.repo.Load("TestRepositoryAggregate", id)
 	c.Assert(err, IsNil)
@@ -110,7 +119,7 @@ func (s *CallbackRepositorySuite) Test_Save_Events(c *C) {
 		AggregateBase: NewAggregateBase(id),
 	}
 
-	event1 := &TestEvent{id, "event"}
+	event1 := &TestRepositoryEvent{id, "event"}
 	agg.StoreEvent(event1)
 	err := s.repo.Save(agg)
 	c.Assert(err, IsNil)
